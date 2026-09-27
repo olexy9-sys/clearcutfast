@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ClearCut AI — Background Remover</title>
+<style>
+:root{font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#f5f7ff;background:#080b13}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0,#1b2450 0,transparent 35%),#080b13}
+.wrap{max-width:1120px;margin:auto;padding:24px 16px 60px}.hero{text-align:center;padding:30px 10px}
+.logo{display:inline-flex;padding:7px 12px;border:1px solid #303b59;border-radius:99px;color:#aebaff;background:#11182a;font-size:13px;font-weight:800}
+h1{font-size:clamp(38px,7vw,68px);margin:16px 0 8px;letter-spacing:-2px;background:linear-gradient(90deg,#9a8cff,#38d8ff);-webkit-background-clip:text;color:transparent}
+.hero p{color:#aab5cc;margin:0;font-size:16px}.card{background:#101624eF;border:1px solid #252f46;border-radius:24px;padding:20px;box-shadow:0 25px 80px #0007}
+.drop{display:block;border:2px dashed #3a4765;border-radius:19px;padding:42px 18px;text-align:center;cursor:pointer;transition:.2s}.drop:hover,.drop.drag{border-color:#8a7dff;background:#161d31}
+.drop .icon{font-size:40px}.drop strong{display:block;font-size:20px;margin-top:8px}.drop span{display:block;color:#8f9bb2;margin-top:8px}
+input{display:none}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:15px}button{border:0;border-radius:12px;padding:12px 17px;background:#7667ff;color:white;font-weight:800;cursor:pointer}button.alt{background:#202a3d}button:disabled{opacity:.45;cursor:not-allowed}
+.statusline{display:flex;justify-content:space-between;gap:10px;color:#aeb8cc;margin:20px 0 8px;font-size:14px}.bar{height:9px;background:#20293c;border-radius:99px;overflow:hidden}.fill{height:100%;width:0;background:linear-gradient(90deg,#7667ff,#38d8ff);transition:width .2s}
+.tip{margin-top:12px;padding:11px 13px;border-radius:12px;background:#0d1422;color:#8f9bb2;font-size:12px;line-height:1.5}.tip b{color:#dbe2f1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:13px;margin-top:18px}.item{background:#0b101b;border:1px solid #202a3e;border-radius:15px;overflow:hidden}.thumb{height:145px;display:flex;align-items:center;justify-content:center;background:repeating-conic-gradient(#1b2434 0 25%,#111827 0 50%) 50%/20px 20px}.thumb img{max-width:100%;max-height:100%;object-fit:contain}.info{padding:9px 10px}.name{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.state{font-size:12px;color:#8795ad;margin-top:5px}.done{color:#4fe0a0}.bad{color:#ff7373}
+@media(max-width:600px){.grid{grid-template-columns:repeat(2,1fr)}.thumb{height:120px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<div class="logo">⚡ FAST • PRIVATE • AI</div>
+<h1>ClearCut AI</h1>
+<p>Remove backgrounds from up to 250 photos directly in your browser.</p>
+</header>
+<main class="card">
+<label class="drop" id="drop">
+<input id="picker" type="file" accept="image/jpeg,image/png,image/webp" multiple webkitdirectory directory>
+<div class="icon">📁</div>
+<strong>Choose a folder</strong>
+<span>Up to 250 images • JPG, PNG or WebP</span>
+</label>
+<div class="actions">
+<button id="choose">Choose Folder</button>
+<button id="start" disabled>✨ Remove Backgrounds</button>
+<button id="zip" disabled>📦 Download ZIP</button>
+<button id="clear" class="alt">Clear</button>
+</div>
+<div class="statusline"><span id="total">0 images</span><span id="count">0 / 0</span></div>
+<div class="bar"><div class="fill" id="fill"></div></div>
+<div class="tip" id="tip"><b>First run:</b> the AI model has to download once. After that, your browser can cache it, so later batches are much faster.</div>
+<div class="grid" id="grid"></div>
+</main>
+</div>
+
+<script type="module">
+import { removeBackground } from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/+esm";
+
+const $=id=>document.getElementById(id);
+const picker=$("picker"), drop=$("drop"), grid=$("grid");
+let files=[], outputs=[], busy=false;
+
+$("choose").onclick=()=>picker.click();
+picker.onchange=()=>loadFiles([...picker.files]);
+
+for(const ev of ["dragenter","dragover"])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag")});
+for(const ev of ["dragleave","drop"])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag")});
+drop.addEventListener("drop",async e=>{
+  const picked=[];
+  const entries=[...e.dataTransfer.items].map(x=>x.webkitGetAsEntry?.()).filter(Boolean);
+  for(const entry of entries) await walk(entry,picked);
+  loadFiles(picked);
+});
+async function walk(entry,out){
+  if(entry.isFile) return new Promise(r=>entry.file(f=>{if(f.type.startsWith("image/"))out.push(f);r()}));
+  if(entry.isDirectory){
+    const reader=entry.createReader();
+    const read=()=>new Promise(resolve=>reader.readEntries(async a=>{if(!a.length)return resolve();for(const x of a)await walk(x,out);await read();resolve()}));
+    await read();
+  }
+}
+function loadFiles(list){
+ if(busy)return;
+ files=list.filter(f=>f.type.startsWith("image/")).slice(0,250);
+ outputs=[];grid.innerHTML="";
+ files.forEach((f,i)=>{
+  const d=document.createElement("div");d.className="item";
+  d.innerHTML=`<div class="thumb"><img src="${URL.createObjectURL(f)}"></div><div class="info"><div class="name">${esc(i+1+". "+f.name)}</div><div class="state" id="s${i}">Waiting</div></div>`;
+  grid.appendChild(d);
+ });
+ $("total").textContent=`${files.length} image${files.length===1?"":"s"}`;
+ $("count").textContent=`0 / ${files.length}`;$("fill").style.width="0%";
+ $("start").disabled=!files.length;$("zip").disabled=true;
+ $("tip").innerHTML=files.length>250?"<b>250-image limit:</b> only the first 250 images were loaded.":"<b>Ready:</b> the AI runs locally in your browser.";
+}
+function esc(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+$("start").onclick=async()=>{
+ if(!files.length||busy)return;busy=true;$("start").disabled=true;$("zip").disabled=true;outputs=[];
+ let done=0;const concurrency=2; // keeps RAM/CPU reasonable on 8GB machines
+ for(let i=0;i<files.length;i+=concurrency){
+   const batch=files.slice(i,i+concurrency);
+   const made=await Promise.all(batch.map((f,j)=>processOne(f,i+j)));
+   outputs.push(...made);done+=batch.length;
+   $("count").textContent=`${done} / ${files.length}`;$("fill").style.width=(done/files.length*100)+"%";
+   await new Promise(r=>setTimeout(r,20));
+ }
+ busy=false;$("start").disabled=false;$("zip").disabled=!outputs.some(Boolean);
+ $("tip").innerHTML="<b>Finished:</b> your images were processed in your browser. Nothing was uploaded to a server.";
+};
+
+async function processOne(file,i){
+ const state=$("s"+i);state.textContent="Loading AI…";
+ try{
+   const blob=await removeBackground(file,{
+     output:{format:"image/png",type:"foreground",quality:1},
+     progress:(key,current,total)=>{
+       if(key)state.textContent=`AI ${total?Math.round(current/total*100):""}%`;
+     }
+   });
+   state.textContent="Done";state.className="state done";
+   return {blob,name:(file.name.replace(/\.[^.]+$/,"")||("image-"+(i+1)))+".png"};
+ }catch(err){
+   console.error(err);state.textContent="Failed";state.className="state bad";return null;
+ }
+}
+
+$("zip").onclick=async()=>{
+ const valid=outputs.filter(Boolean);if(!valid.length)return;
+ $("zip").disabled=true;$("zip").textContent="Creating ZIP…";
+ const zip=(await import("https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm")).default;
+ const z=new zip();for(const x of valid)z.file(x.name,x.blob);
+ const blob=await z.generateAsync({type:"blob",compression:"STORE"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="clearcut-ai-results.zip";a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),3000);$("zip").textContent="📦 Download ZIP";$("zip").disabled=false;
+};
+$("clear").onclick=()=>{if(busy)return;files=[];outputs=[];grid.innerHTML="";picker.value="";$("total").textContent="0 images";$("count").textContent="0 / 0";$("fill").style.width="0%";$("start").disabled=true;$("zip").disabled=true};
+</script>
+</body>
+</html>
